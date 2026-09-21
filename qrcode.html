@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>IE Chair QR Code 產生器</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 600px;
+      margin: 40px auto;
+      padding: 20px;
+    }
+    label {
+      display: block;
+      margin-top: 15px;
+      font-weight: bold;
+    }
+    select, input {
+      font-size: 16px;
+      padding: 8px;
+      width: 100%;
+      box-sizing: border-box;
+      margin-top: 5px;
+    }
+    button {
+      font-size: 16px;
+      padding: 10px 20px;
+      margin-top: 20px;
+      cursor: pointer;
+    }
+    #urlBox {
+      margin-top: 20px;
+      padding: 10px;
+      background: #f5f5f5;
+      border: 1px solid #ccc;
+      word-break: break-all;
+      font-size: 14px;
+    }
+    #qrcode {
+      margin-top: 20px;
+      text-align: center;
+    }
+    .hint {
+      color: #666;
+      font-size: 13px;
+      margin-top: 4px;
+    }
+  </style>
+</head>
+<body>
+  <h1>IE Chair QR Code 產生器</h1>
+
+  <label>計時頁網址（Base URL）</label>
+  <input id="baseUrl" type="text"
+         placeholder="例如：https://你的帳號.github.io/timer.html">
+  <p class="hint">
+    把計時頁部署後的公開網址貼在這裡。掃描 QR code 會打開此頁並自動帶入下方參數。
+  </p>
+
+  <label>Group（組別）</label>
+  <select id="groupSelect">
+    <option value="G01">G01</option>
+    <option value="G02">G02</option>
+    <option value="G03">G03</option>
+    <option value="G04">G04</option>
+    <option value="G05">G05</option>
+    <option value="G06">G06</option>
+    <option value="G07">G07</option>
+    <option value="G08">G08</option>
+    <option value="G09">G09</option>
+    <option value="G10">G10</option>
+    <option value="G11">G11</option>
+    <option value="G12">G12</option>
+  </select>
+
+  <label>Station（工站）</label>
+  <select id="stationSelect">
+    <option value="ST01">ST01</option>
+    <option value="ST02">ST02</option>
+    <option value="ST03">ST03</option>
+    <option value="ST04">ST04</option>
+    <option value="ST05">ST05</option>
+    <option value="ST06">ST06</option>
+    <option value="ST07">ST07</option>
+    <option value="ST08">ST08</option>
+  </select>
+
+  <label>Product（產品）</label>
+  <input id="productInput" type="text" placeholder="例如：P123">
+
+  <button id="genBtn">產生 QR Code</button>
+
+  <div id="urlBox">尚未產生網址</div>
+  <div id="qrcode"></div>
+
+  <!-- QR code 產生函式庫（qrcodejs） -->
+  <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+  <script>
+    let qr = null;
+
+    document.getElementById("genBtn").addEventListener("click", function () {
+      const base = document.getElementById("baseUrl").value.trim();
+      const group = document.getElementById("groupSelect").value;
+      const station = document.getElementById("stationSelect").value;
+      const product = document.getElementById("productInput").value.trim();
+
+      if (!base) {
+        document.getElementById("urlBox").textContent =
+          "請先填入計時頁網址（Base URL）";
+        return;
+      }
+
+      // 組出帶參數的網址
+      const params = new URLSearchParams();
+      params.set("group", group);
+      params.set("station", station);
+      if (product) {
+        params.set("product", product);
+      }
+
+      const fullUrl = base + "?" + params.toString();
+
+      // 顯示網址
+      document.getElementById("urlBox").textContent = fullUrl;
+
+      // 產生 QR code
+      const qrDiv = document.getElementById("qrcode");
+      qrDiv.innerHTML = "";
+      qr = new QRCode(qrDiv, {
+        text: fullUrl,
+        width: 256,
+        height: 256
+      });
+    });
+  </script>
+</body>
+</html>

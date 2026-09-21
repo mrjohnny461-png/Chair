@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>IE Chair Data Download</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 900px;
+      margin: 40px auto;
+      padding: 20px;
+    }
+    select, button {
+      font-size: 16px;
+      padding: 10px;
+      margin: 5px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+    }
+    th, td {
+      border: 1px solid #ccc;
+      padding: 8px;
+      text-align: center;
+    }
+    th {
+      background: #eee;
+    }
+    #status {
+      font-weight: bold;
+      margin-top: 15px;
+    }
+  </style>
+</head>
+<body>
+<h1>IE Chair Data Download</h1>
+<p>
+  Group：
+  <select id="groupSelect">
+    <option value="ALL">全部</option>
+    <option value="G01">G01</option>
+    <option value="G02">G02</option>
+    <option value="G03">G03</option>
+    <option value="G04">G04</option>
+    <option value="G05">G05</option>
+    <option value="G06">G06</option>
+    <option value="G07">G07</option>
+    <option value="G08">G08</option>
+    <option value="G09">G09</option>
+    <option value="G10">G10</option>
+    <option value="G11">G11</option>
+    <option value="G12">G12</option>
+  </select>
+  <button id="loadBtn">讀取資料</button>
+  <button id="downloadBtn" disabled>下載 CSV</button>
+</p>
+<p id="status">尚未讀取資料</p>
+<table id="dataTable">
+  <thead>
+    <tr>
+      <th>ID</th>
+      <th>Group</th>
+      <th>Product</th>
+      <th>Station</th>
+      <th>Start</th>
+      <th>Finish</th>
+      <th>Duration</th>
+      <th>Status</th>
+    </tr>
+  </thead>
+  <tbody></tbody>
+</table>
+
+<h2>統計摘要（依工站）</h2>
+<p id="statNote" style="color:#666; font-size:14px;">
+  說明：稼動率的分母採用「該工站第一筆開始 ~ 最後一筆結束」的觀測期間，
+  非實際排班時間，僅供參考。
+</p>
+<table id="statTable">
+  <thead>
+    <tr>
+      <th>Station</th>
+      <th>筆數</th>
+      <th>平均 Cycle Time (秒)</th>
+      <th>運轉時間 (秒)</th>
+      <th>閒置時間 (秒)</th>
+      <th>稼動率 (%)</th>
+    </tr>
+  </thead>
+  <tbody></tbody>
+</table>
+
+<script>
+const SUPABASE_URL = "https://fqbsrcbxtmagczykoesv.supabase.co";
+const SUPABASE_KEY = "sb_publishable_mn0CAB_nkrDycq6DS3Q2_g_-80SlWHB";
+
+let currentData = [];
+
+// --------------------------
+// 讀取 Supabase
+// --------------------------
+document
+  .getElementById("loadBtn")
+  .addEventListener("click", async function () {
+    const group = document.getElementById("groupSelect").value;
+    document.getElementById("status").textContent = "正在讀取資料...";
+
+    let url = SUPABASE_URL + "/rest/v1/events?select=*";
+
+    // 如果不是 ALL，只讀指定 Group
+    if (group !== "ALL") {
+      url += "&group_id=eq." + encodeURIComponent(group);
+    }
+
+    try {
+      const response = await fetch(url, {
+        headers: {
+          "apikey": SUPABASE_KEY,
+          "Authorization": "Bearer " + SUPABASE_KEY
+        }
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(error);
+      }
+
+      currentData = await response.json();
+      showTable(currentData);
+
+      document.getElementById("status").textContent =
+        "讀取完成，共 " + currentData.length + " 筆資料";
+
+      document.getElementById("downloadBtn").disabled =
+        currentData.length === 0;
+    } catch (error) {
+      document.getElementById("status").textContent =
+        "讀取失敗：" + error.message;
+    }
+  });
+
+// --------------------------
+// 顯示 Table
+// --------------------------
+function showTable(data) {
+  const tbody = document.querySelector("#dataTable tbody");
+  tbody.innerHTML = "";
+
+  data.forEach(row => {
+    const tr = document.createElement("tr");
+    const values = [
+      row.id,
+      row.group_id,
+      row.product_id,
+      row.station_id,
+      row.start_time,
+      row.finish_time,
+      row.duration_sec,
+      row.status
+    ];
+
+    values.forEach(value => {
+      const td = document.createElement("td");
+      td.textContent = value ?? "";
+      tr.appendChild(td);
+    });
+
+    tbody.appendChild(tr);
+  });
+}
+
+// --------------------------
+// 下載 CSV
+// --------------------------
+document
+  .getElementById("downloadBtn")
+  .addEventListener("click", function () {
+    if (currentData.length === 0) {
+      return;
+    }
+
+    const columns = [
+      "id",
+      "group_id",
+      "product_id",
+      "station_id",
+      "start_time",
+      "finish_time",
+      "duration_sec",
+      "status"
+    ];
+
+    const csvRows = [];
+    csvRows.push(columns.join(","));
+
+    currentData.forEach(row => {
+      const values = columns.map(column => {
+        let value = row[column] ?? "";
+        value = String(value).replace(/"/g, '""');
+        return '"' + value + '"';
+      });
+      csvRows.push(values.join(","));
+    });
+
+    // UTF-8 BOM
+    // 避免 Excel 中文亂碼
+    const csv = "\uFEFF" + csvRows.join("\n");
+
+    const blob = new Blob([csv], {
+      type: "text/csv;charset=utf-8;"
+    });
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const group = document.getElementById("groupSelect").value;
+
+    link.href = url;
+    link.download = "events_" + group + ".csv";
+    link.click();
+
+    URL.revokeObjectURL(url);
+  });
+</script>
+</body>
+</html>
