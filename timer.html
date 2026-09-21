@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>IE Chair Production</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 500px;
+      margin: 40px auto;
+      padding: 20px;
+    }
+    button {
+      font-size: 20px;
+      padding: 15px 25px;
+      margin: 5px;
+    }
+    #status {
+      margin-top: 20px;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <h1>IE Chair Production</h1>
+  <p>Group：<span id="group"></span></p>
+  <p>Product：<span id="product"></span></p>
+  <p>Station：<span id="station"></span></p>
+
+  <button id="startBtn">START</button>
+  <button id="finishBtn" disabled>FINISH</button>
+
+  <p id="status">等待操作</p>
+
+  <script>
+    const SUPABASE_URL =
+      "https://fqbsrcbxtmagczykoesv.supabase.co";
+    const SUPABASE_KEY =
+      "sb_publishable_mn0CAB_nkrDycq6DS3Q2_g_-80SlWHB";
+
+    // 讀取網址參數
+    const params = new URLSearchParams(window.location.search);
+    const group = params.get("group");
+    const product = params.get("product");
+    const station = params.get("station");
+
+    document.getElementById("group").textContent = group || "未設定";
+    document.getElementById("product").textContent = product || "未設定";
+    document.getElementById("station").textContent = station || "未設定";
+
+    let startTime = null;
+
+    // START
+    document.getElementById("startBtn").addEventListener("click", function () {
+      startTime = new Date();
+      document.getElementById("status").textContent =
+        "作業開始：" + startTime.toLocaleTimeString();
+      document.getElementById("startBtn").disabled = true;
+      document.getElementById("finishBtn").disabled = false;
+    });
+
+    // FINISH
+    document.getElementById("finishBtn").addEventListener("click", async function () {
+      // 先確認按鈕有反應
+      document.getElementById("status").textContent =
+        "FINISH 已按下，準備上傳...";
+
+      if (!startTime) {
+        document.getElementById("status").textContent =
+          "錯誤：尚未按 START";
+        return;
+      }
+
+      const finishTime = new Date();
+      const durationSec =
+        (finishTime.getTime() - startTime.getTime()) / 1000;
+
+      const data = {
+        group_id: group,
+        product_id: product,
+        station_id: station,
+        start_time: startTime.toISOString(),
+        finish_time: finishTime.toISOString(),
+        duration_sec: durationSec,
+        status: "COMPLETED"
+      };
+
+      try {
+        document.getElementById("status").textContent =
+          "正在傳送到 Supabase...";
+
+        const response = await fetch(
+          SUPABASE_URL + "/rest/v1/event",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "apikey": SUPABASE_KEY,
+              "Authorization": "Bearer " + SUPABASE_KEY,
+              "Prefer": "return=minimal"
+            },
+            body: JSON.stringify(data)
+          }
+        );
+
+        if (response.ok) {
+          document.getElementById("status").textContent =
+            "✓ 上傳成功！作業時間：" +
+            durationSec.toFixed(1) +
+            " 秒";
+          document.getElementById("finishBtn").disabled = true;
+        } else {
+          const errorText = await response.text();
+          document.getElementById("status").textContent =
+            "✗ Supabase 上傳失敗：" +
+            response.status + " " + errorText;
+        }
+      } catch (error) {
+        document.getElementById("status").textContent =
+          "✗ JavaScript 錯誤：" + error.message;
+      }
+    });
+  </script>
+</body>
+</html>
