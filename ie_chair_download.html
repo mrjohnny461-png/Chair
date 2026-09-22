@@ -56,6 +56,10 @@
   </select>
   <button id="loadBtn">讀取資料</button>
   <button id="downloadBtn" disabled>下載 CSV</button>
+  <button id="deleteAllBtn"
+          style="background:#c0392b; color:#fff; border:none;">
+    一鍵刪除全部
+  </button>
 </p>
 <p id="status">尚未讀取資料</p>
 <table id="dataTable">
@@ -69,6 +73,7 @@
       <th>Finish</th>
       <th>Duration</th>
       <th>Status</th>
+      <th>操作</th>
     </tr>
   </thead>
   <tbody></tbody>
@@ -76,8 +81,9 @@
 
 <h2>統計摘要（依工站）</h2>
 <p id="statNote" style="color:#666; font-size:14px;">
-  說明：稼動率的分母採用「該工站第一筆開始 ~ 最後一筆結束」的觀測期間，
-  非實際排班時間，僅供參考。
+  說明：以「同一組 group + product」視為一趟流程，工站依 ST 編號由小到大排序。
+  閒置時間 = 本站開始時間 − 前一站結束時間（工件在站間的等待），第一站無前站故為 0。
+  稼動率 = 作業時間 ÷（作業時間 + 等待時間）。
 </p>
 <table id="statTable">
   <thead>
@@ -85,8 +91,9 @@
       <th>Station</th>
       <th>筆數</th>
       <th>平均 Cycle Time (秒)</th>
-      <th>運轉時間 (秒)</th>
-      <th>閒置時間 (秒)</th>
+      <th>總作業時間 (秒)</th>
+      <th>平均等待時間 (秒)</th>
+      <th>總等待時間 (秒)</th>
       <th>稼動率 (%)</th>
     </tr>
   </thead>
@@ -108,7 +115,7 @@ document
     const group = document.getElementById("groupSelect").value;
     document.getElementById("status").textContent = "正在讀取資料...";
 
-    let url = SUPABASE_URL + "/rest/v1/events?select=*";
+    let url = SUPABASE_URL + "/rest/v1/event?select=*";
 
     // 如果不是 ALL，只讀指定 Group
     if (group !== "ALL") {
@@ -130,6 +137,7 @@ document
 
       currentData = await response.json();
       showTable(currentData);
+      showStats(currentData);
 
       document.getElementById("status").textContent =
         "讀取完成，共 " + currentData.length + " 筆資料";
@@ -168,8 +176,298 @@ function showTable(data) {
       tr.appendChild(td);
     });
 
+    // 操作欄：刪除按鈕
+    const actionTd = document.createElement("td");
+    const delBtn = document.createElement("button");
+    delBtn.textContent = "刪除";
+    delBtn.style.background = "#c0392b";
+    delBtn.style.color = "#fff";
+    delBtn.style.border = "none";
+    delBtn.style.padding = "6px 12px";
+    delBtn.style.cursor = "pointer";
+    delBtn.addEventListener("click", function () {
+      deleteRecord(row.id, delBtn);
+    });
+    actionTd.appendChild(delBtn);
+    tr.appendChild(actionTd);
+
     tbody.appendChild(tr);
   });
+}
+
+// --------------------------
+// 刪除單筆紀錄
+// --------------------------
+async function deleteRecord(id, btn) {
+  if (id === undefined || id === null || id === "") {
+    alert("此筆資料沒有 id，無法刪除");
+    return;
+  }
+
+  const ok = confirm("確定要刪除這筆紀錄嗎？此動作無法復原。\nID：" + id);
+  if (!ok) return;
+
+  btn.disabled = true;
+  btn.textContent = "刪除中...";
+
+  try {
+    const response = await fetch(
+      SUPABASE_URL + "/rest/v1/event?id=eq." + encodeURIComponent(id),
+      {
+        method: "DELETE",
+        headers: {
+          "apikey": SUPABASE_KEY,
+          "Authorization": "Bearer " + SUPABASE_KEY,
+          "Prefer": "return=minimal"
+        }
+      }
+    );
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(response.status + " " + errText);
+    }
+
+    // 從本地資料移除該筆，並重新渲染表格與統計
+    currentData = currentData.filter(r => String(r.id) !== String(id));
+    showTable(currentData);
+    showStats(currentData);
+
+    document.getElementById("status").textContent =
+      "已刪除 1 筆，剩餘 " + currentData.length + " 筆資料";
+
+    document.getElementById("downloadBtn").disabled =
+      currentData.length === 0;
+  } catch (error) {
+    btn.disabled = false;
+    btn.textContent = "刪除";
+    document.getElementById("status").textContent =
+      "刪除失敗：" + error.message;
+    alert("刪除失敗：" + error.message);
+  }
+}
+
+// --------------------------
+// 一鍵刪除全部（清空 event 表所有資料）
+// --------------------------
+document
+  .getElementById("deleteAllBtn")
+  .addEventListener("click", async function () {
+    // 兩道確認，避免誤按
+    const ok1 = confirm(
+      "確定要刪除【全部】測試資料嗎？\n此動作會清空整張 event 表，無法復原。"
+    );
+    if (!ok1) return;
+
+    const typed = prompt(
+      "最後確認：請輸入 DELETE 以刪除全部資料。"
+    );
+    if (typed !== "DELETE") {
+      document.getElementById("status").textContent =
+        "已取消刪除（未輸入 DELETE）";
+      return;
+    }
+
+    const btn = document.getElementById("deleteAllBtn");
+    btn.disabled = true;
+    btn.textContent = "刪除中...";
+    document.getElementById("status").textContent = "正在刪除全部資料...";
+
+    try {
+      // PostgREST 要求 DELETE 必須帶條件，
+      // 用 id 不為 null（即全部列）作為條件刪除整張表
+      const response = await fetch(
+        SUPABASE_URL + "/rest/v1/event?id=not.is.null",
+        {
+          method: "DELETE",
+          headers: {
+            "apikey": SUPABASE_KEY,
+            "Authorization": "Bearer " + SUPABASE_KEY,
+            "Prefer": "return=minimal"
+          }
+        }
+      );
+
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(response.status + " " + errText);
+      }
+
+      // 清空畫面
+      currentData = [];
+      showTable(currentData);
+      showStats(currentData);
+      document.getElementById("downloadBtn").disabled = true;
+      document.getElementById("status").textContent =
+        "✓ 已刪除全部資料";
+    } catch (error) {
+      document.getElementById("status").textContent =
+        "刪除全部失敗：" + error.message;
+      alert("刪除全部失敗：" + error.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "一鍵刪除全部";
+    }
+  });
+
+// --------------------------
+// 計算並顯示統計摘要
+// 稼動率 / 閒置時間 / 平均 Cycle Time（依工站）
+// --------------------------
+// 從 station_id 取出數字（例如 "ST05" -> 5），僅供參考
+function stationNumber(stationId) {
+  const m = String(stationId ?? "").match(/\d+/);
+  return m ? parseInt(m[0], 10) : Number.MAX_SAFE_INTEGER;
+}
+
+// 等待時間上限（秒）：超過此值視為跨批/換線，不計入站間等待
+// 避免「同一 group+product 在不同時段各做一趟」被首尾相接算成超長等待
+const MAX_WAIT_SEC = 600; // 10 分鐘
+
+function showStats(data) {
+  const tbody = document.querySelector("#statTable tbody");
+  tbody.innerHTML = "";
+
+  // 只取已完成的紀錄
+  const rows = data.filter(r => r.status === "COMPLETED");
+
+  // 步驟 1：依 group_id + product_id 分成一趟趟流程
+  const flows = {};
+  rows.forEach(r => {
+    const key = (r.group_id ?? "") + "||" + (r.product_id ?? "");
+    if (!flows[key]) {
+      flows[key] = [];
+    }
+    flows[key].push(r);
+  });
+
+  // 各工站彙總容器：stats[station] = { qty, runSum, waitSum }
+  const stats = {};
+  function ensure(station) {
+    if (!stats[station]) {
+      stats[station] = { qty: 0, runSum: 0, waitSum: 0 };
+    }
+    return stats[station];
+  }
+
+  // 步驟 2、3：每趟流程內依「實際開始時間」排序，逐筆算作業與等待
+  Object.values(flows).forEach(flowRows => {
+    // 依 start_time 由早到晚排序（真實發生順序）
+    const sorted = flowRows
+      .slice()
+      .sort((a, b) =>
+        new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
+      );
+
+    let prevFinish = null; // 前一筆結束時間（毫秒）
+
+    sorted.forEach(r => {
+      const station = r.station_id ?? "(未指定)";
+      const s = ensure(station);
+
+      // 作業時間
+      const dur = Number(r.duration_sec) || 0;
+
+      // 等待時間 = 本筆開始 - 前一筆結束
+      const startMs = new Date(r.start_time).getTime();
+      let waitSec = 0;
+      if (prevFinish !== null && !isNaN(startMs)) {
+        waitSec = (startMs - prevFinish) / 1000;
+        if (waitSec < 0) waitSec = 0;           // 時間重疊不算負
+        if (waitSec > MAX_WAIT_SEC) waitSec = 0; // 跨批/換線不計入
+      }
+
+      s.qty += 1;
+      s.runSum += dur;
+      s.waitSum += waitSec;
+
+      const finishMs = new Date(r.finish_time).getTime();
+      if (!isNaN(finishMs)) {
+        prevFinish = finishMs;
+      }
+    });
+  });
+
+  // 步驟 4：依工站編號排序輸出
+  const stationKeys = Object.keys(stats).sort(
+    (a, b) => stationNumber(a) - stationNumber(b)
+  );
+
+  // 全體加總（用來算整體稼動率）
+  let totalQty = 0;
+  let totalRun = 0;
+  let totalWait = 0;
+
+  stationKeys.forEach(station => {
+    const s = stats[station];
+    const qty = s.qty;
+
+    const avgCycle = qty > 0 ? s.runSum / qty : 0;
+    const avgWait = qty > 0 ? s.waitSum / qty : 0;
+
+    // 稼動率 = 作業時間 / (作業時間 + 等待時間)
+    const denom = s.runSum + s.waitSum;
+    const utilization = denom > 0 ? (s.runSum / denom) * 100 : 0;
+
+    totalQty += qty;
+    totalRun += s.runSum;
+    totalWait += s.waitSum;
+
+    const values = [
+      station,
+      qty,
+      avgCycle.toFixed(1),
+      Math.round(s.runSum),
+      avgWait.toFixed(1),
+      Math.round(s.waitSum),
+      utilization.toFixed(1)
+    ];
+
+    const tr = document.createElement("tr");
+    values.forEach(value => {
+      const td = document.createElement("td");
+      td.textContent = value;
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+
+  // 沒有可統計資料時給提示
+  if (stationKeys.length === 0) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 7;
+    td.textContent = "無 status = COMPLETED 的資料可供統計";
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return;
+  }
+
+  // 最後一列：整體總計（整條線的總稼動率）
+  const totalDenom = totalRun + totalWait;
+  const totalUtil = totalDenom > 0 ? (totalRun / totalDenom) * 100 : 0;
+  const totalAvgCycle = totalQty > 0 ? totalRun / totalQty : 0;
+  const totalAvgWait = totalQty > 0 ? totalWait / totalQty : 0;
+
+  const totalValues = [
+    "總計",
+    totalQty,
+    totalAvgCycle.toFixed(1),
+    Math.round(totalRun),
+    totalAvgWait.toFixed(1),
+    Math.round(totalWait),
+    totalUtil.toFixed(1)
+  ];
+
+  const totalTr = document.createElement("tr");
+  totalTr.style.fontWeight = "bold";
+  totalTr.style.background = "#f0f0f0";
+  totalValues.forEach(value => {
+    const td = document.createElement("td");
+    td.textContent = value;
+    totalTr.appendChild(td);
+  });
+  tbody.appendChild(totalTr);
 }
 
 // --------------------------
